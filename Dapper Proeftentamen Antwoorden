@@ -1,0 +1,86 @@
+using Dapper;
+using DapperTentamens.Model;
+using DapperTentamens.Tests;
+
+
+namespace DapperTentamens;
+
+public class Proeftentamen : TestHelper
+{
+    // Opdracht 1:
+    // Geef het aantal orders van de medewerker die de meeste orders heeft verkocht.
+    private static int MaxNumberOfOrdersByEmployee()
+    {
+        string sql = """
+                        SELECT COUNT(1) as cnt 
+                        FROM Orders
+                        GROUP BY EmployeeID
+                        ORDER BY cnt DESC
+                        LIMIT 1
+                     """;
+
+        var connection = DBHelper.GetConnection();
+        int result = connection.QuerySingle<int>(sql);
+        return result;
+    }
+
+   
+    // Opdracht 2:
+    // Geef de producten terug die een prijs hebben tussen minPrice en maxPrice.
+    // Als minPrice of maxPrice null is, dan wordt er niet gefilterd op die waarde.
+    // De producten moeten gesorteerd worden op prijs en daarna naam.
+    // Onder de methode staan 4 testen die je kunt gebruiken om de methode te testen.
+    // 1 Query mag gebruikt worden (dus geen branching (if else constructies in de C# code)).
+    public List<Product> GetProducts(int? minPrice = null, int? maxPrice = null)
+    {
+        string sql = """
+                     SELECT p.ProductID, p.ProductName, p.SupplierID, p.CategoryID, p.Unit, p.Price
+                     FROM Products p
+                     WHERE (@minPrice IS NULL OR p.Price >= @minPrice) 
+                       AND
+                           (@maxPrice IS NULL OR p.Price <= @maxPrice)
+                     ORDER BY p.Price, p.ProductName
+                     """;
+
+        var connection = DBHelper.GetConnection();
+        var products = connection
+            .Query<Product>(sql, new { minPrice, maxPrice })
+            .ToList();
+        return products;
+    }
+
+    // Opdracht 3:
+    // Haal alle categorieën op, inclusief de producten van de categorie.
+    // Sorteer eerst op categorienaam en dan op productnaam.
+    // Een categorie heeft een lijst van producten. Deze moet gevuld worden.(multimapping)
+    
+    private static List<Product> GetProductsIncludeCategory()
+    {
+        string sql = """
+                        SELECT p.ProductID, p.ProductName, p.SupplierID, p.CategoryID, p.Unit, p.Price,
+                               '' as CategorySplit,
+                               c.CategoryID, c.CategoryName, c.Description
+                        FROM Products p 
+                            JOIN Categories c ON p.CategoryID = c.CategoryID 
+                        ORDER BY p.CategoryID, p.ProductName
+                     """;
+
+        var connection = DBHelper.GetConnection();
+
+        var productsWithCategories =
+            connection.Query<Product, Category, Product>(
+                sql,
+                map: (Product product, Category category) =>
+                {
+                    product.Category = category;
+                    return product;
+                },
+                splitOn: "CategorySplit"
+            ).ToList();
+        return productsWithCategories;
+    }
+}
+
+
+
+
