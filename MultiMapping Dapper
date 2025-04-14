@@ -1,0 +1,152 @@
+// 📝 STAP-VOOR-STAP UITLEG: Dapper Multi Mapping
+
+/*
+🎯 DOEL:
+Gegevens uit meerdere tabellen combineren in objecten die aan elkaar gekoppeld zijn.
+Bijv: Product bevat een Category-object.
+
+========================
+🔢 STAPPENPLAN
+========================
+
+1️⃣ Schrijf een JOIN-query die data haalt uit meerdere tabellen
+--------------------------------------------------------------
+Bijv:
+SELECT p.ProductID, p.ProductName, 
+       '' AS CategorySplit,          <-- marker voor splitOn
+       c.CategoryID, c.CategoryName
+FROM Products p
+JOIN Categories c ON p.CategoryID = c.CategoryID
+
+2️⃣ Voeg een 'scheidingskolom' toe (splitOn marker)
+---------------------------------------------------
+Gebruik een fictieve kolomnaam in je SELECT:
+    '' AS CategorySplit
+
+Waarom?
+Dapper weet niet vanzelf waar Product eindigt en Category begint.
+Deze kolom helpt Dapper de grens herkennen.
+
+3️⃣ Gebruik Dapper’s Query<> met meerdere types
+-----------------------------------------------
+Gebruik:
+Query<Product, Category, Product>()
+
+De betekenis van de generieke types:
+- Eerste: objecttype vóór de split (Product)
+- Tweede: objecttype ná de split (Category)
+- Derde: het type dat je terug wilt krijgen (ook Product)
+
+4️⃣ Schrijf een mapping-functie
+-------------------------------
+map: (product, category) =>
+{
+    product.Category = category;
+    return product;
+}
+
+Deze functie combineert de twee objecten (Product + Category).
+
+5️⃣ Geef de splitOn-kolomnaam door
+----------------------------------
+splitOn: "CategorySplit"
+
+Deze naam moet exact overeenkomen met de kolomnaam in je SELECT-statement.
+
+6️⃣ Zet het resultaat om naar een lijst
+---------------------------------------
+Bijv:
+.ToList()
+
+Volledig voorbeeld:
+var result = connection.Query<Product, Category, Product>(
+    sql,
+    map: (product, category) =>
+    {
+        product.Category = category;
+        return product;
+    },
+    splitOn: "CategorySplit"
+).ToList();
+
+========================
+📌 EXTRA TIPS
+========================
+
+✅ Zorg dat de kolommen in de SELECT exact dezelfde volgorde hebben als de objecttypes in Query<>
+✅ Als je splitOn vergeet of fout typt, krijg je rare null-objecten of fouten
+✅ Je mag ook een echte kolomnaam gebruiken als splitOn, bijv. "CategoryID"
+✅ splitOn hoeft GEEN lege string te zijn — als je weet waar het tweede object begint (bijv. CategoryID), gebruik dat
+
+========================
+🧠 Samengevat
+========================
+
+Dapper multi mapping:
+- Combineert data uit meerdere tabellen
+- Vereist splitOn om objectgrens aan te geven
+- Gebruikt een mapping-functie om objecten te koppelen
+
+Perfect voor relaties zoals:
+- Product → Category
+- Order → Customer
+- BlogPost → Author
+
+*/
+
+
+
+
+
+
+// 📝 Aantekeningen Dapper Multi Mapping
+
+/*
+🔧 DOEL:
+- Data ophalen uit meerdere tabellen (bijv. Products + Categories)
+- Die data mappen naar gekoppelde objecten (Product bevat een Category)
+
+💡 Gebruik:
+Query<TFirst, TSecond, TResult>(
+    string sql,
+    Func<TFirst, TSecond, TResult> map,
+    string splitOn
+)
+
+🧩 splitOn:
+- Nodig om Dapper te vertellen waar de 2e tabel begint
+- Moet overeenkomen met de kolomnaam waar het 2e object begint
+- Tip: gebruik '' as CategorySplit om duidelijk te scheiden
+
+🛠️ Mapping:
+map: (product, category) =>
+{
+    product.Category = category;
+    return product;
+}
+
+🧪 Voorbeeld query:
+SELECT p.ProductID, p.ProductName,
+       '' as CategorySplit,
+       c.CategoryID, c.CategoryName
+FROM Products p
+JOIN Categories c ON p.CategoryID = c.CategoryID
+
+🧾 Complete voorbeeld:
+var result = connection.Query<Product, Category, Product>(
+    sql,
+    map: (product, category) =>
+    {
+        product.Category = category;
+        return product;
+    },
+    splitOn: "CategorySplit"
+).ToList();
+
+📌 Belangrijk:
+- Volgorde van velden in SELECT moet overeenkomen met volgorde van generieke types
+- splitOn MOET een kolomnaam zijn die in de SELECT voorkomt
+- Meerdere joins? Gebruik meerdere generieke types en grotere mapping-functies
+*/
+
+
