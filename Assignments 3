@@ -1,0 +1,361 @@
+using System.Data;
+using BenchmarkDotNet.Attributes;
+using Dapper;
+using DapperBeer.DTO;
+using DapperBeer.Model;
+using DapperBeer.Tests;
+
+namespace DapperBeer;
+
+public class Assignments3
+{
+    // 3.1 Question
+    // Tip: Kijk in voorbeelden en sheets voor inspiratie.
+    // Deze staan in de directory ExampleFromSheets/Relationships.cs. 
+    // De sheets kan je vinden op: https://slides.com/jorislops/dapper/
+    // Kijk niet te veel naar de voorbeelden van relaties op https://www.learndapper.com/relationships
+    // Deze aanpak is niet altijd de manier de gewenst is!
+    
+    // 1 op 1 relatie (one-to-one relationship)
+    // Een brouwmeester heeft altijd 1 adres. Haal alle brouwmeesters op en zorg ervoor dat het address gevuld is.
+    // Sorteer op naam.
+    // Met andere woorden een brouwmeester heeft altijd een adres (Property Address van type Address), zie de klasse Brewmaster.
+    // Je kan dit doen door een JOIN te gebruiken.
+    // Je zult de map functie in Query<Brewmaster, Address, Brewmaster>(sql, map: ...) moeten gebruiken om de Address property van Brewmaster te vullen.
+    // Kijk in voorbeelden hoe je dit kan doen. Deze staan in de directory ExampleFromSheets/Relationships.cs.
+    public static List<Brewmaster> GetAllBrouwmeestersIncludesAddress()
+    {
+        string sql = @"
+            SELECT 
+                Brewmaster.*, 
+                Address.*
+            FROM Brewmaster
+            INNER JOIN Address ON Brewmaster.AddressId = Address.AddressId
+            WHERE Brewmaster.AddressId IS NOT NULL
+            ORDER BY Brewmaster.Name;
+        ";
+
+        using var connection = DbHelper.GetConnection();
+        return connection.Query<Brewmaster, Address, Brewmaster>(
+            sql,
+            (brewmaster, address) =>
+            {
+                // Koppel het adres aan de Brewmaster
+                brewmaster.Address = address;
+                return brewmaster;
+            },
+            splitOn: "AddressId"
+        ).ToList();
+    }
+
+    // 3.2 Question
+    // 1 op 1 relatie (one-to-one relationship)
+    // Haal alle brouwmeesters op en zorg ervoor dat de brouwer (Brewer) gevuld is.
+    // Sorteer op naam.
+    public static List<Brewmaster> GetAllBrewmastersWithBrewery()
+    {
+        string sql =
+            @"select brewmaster.BrewmasterId, brewmaster.Name, brewmaster.BrewerId, brewmaster.AddressId as addressid, brewer.BrewerId, brewer.Name, brewer.Country
+              from brewmaster, brewer
+              where brewmaster.BrewerId = brewer.BrewerId
+              order by brewmaster.Name";
+
+        using var connection = DbHelper.GetConnection();
+        List<Brewmaster> brewmasters = connection.Query<Brewmaster, Brewer, Brewmaster>(sql,
+            map: (brewmaster, brewer) =>
+            {
+                brewmaster.Brewer = brewer;
+                return brewmaster;
+            },
+            splitOn:
+            "addressid").ToList();
+        return brewmasters;
+    }
+
+    // 3.3 Question
+    // 1 op 1 (0..1) (one-to-one relationship) 
+    // Geef alle brouwers op en zorg ervoor dat de brouwmeester gevuld is.
+    // Sorteer op brouwernaam.
+    //
+    // Niet alle brouwers hebben een brouwmeester.
+    // Let op: gebruik het correcte type JOIN (JOIN, LEFT JOIN, RIGHT JOIN).
+    // Dapper snapt niet dat het om een 1 - 0..1 relatie gaat.
+    // De Query methode ziet er als volgt uit (let op het vraagteken optioneel):
+    // Query<Brewer, Brewmaster?, Brewer>(sql, map: ...)
+    // Wat je kan doen is in de map functie een controle toevoegen:
+    // if (brewmaster is not null) { brewer.Brewmaster = brewmaster; }
+    public static List<Brewer> GetAllBrewersIncludeBrewmaster()
+    {
+        string sql = @"select brewer.BrewerId, brewer.Name, brewer.Country
+                       from brewer
+                       order by brewer.Name";
+
+        using var connection = DbHelper.GetConnection();
+        List<Brewer> brewers = connection.Query<Brewer>(sql).ToList();
+        return brewers;
+    }
+
+    // 3.4 Question
+    // 1 op veel relatie (one-to-many relationship)
+    // Geef een overzicht van alle bieren. Zorg ervoor dat de property Brewer gevuld is.
+    // Sorteer op biernaam.
+    // Zorg ervoor dat bieren van dezelfde brouwerij naar dezelfde instantie van Brouwer verwijzen.
+    // Dit kan je doen door een Dictionary<int, Brouwer> te gebruiken.
+    // Kijk in voorbeelden hoe je dit kan doen. Deze staan in de directory ExampleFromSheets/Relationships.cs.
+    public static List<Beer> GetAllBeersIncludeBrewery()
+    {
+        string sql =
+            @"select beer.BeerId, beer.Name, beer.Type, beer.Style, beer.Alcohol, beer.BrewerId as brewerid, brewer.BrewerId, brewer.Name, brewer.Country
+                       from beer, brewer
+                       where beer.BrewerId = brewer.BrewerId
+                       order by beer.Name, beer.BeerId";
+
+        Dictionary<int, Beer> BrouwerId = new Dictionary<int, Beer>();
+
+        using var connection = DbHelper.GetConnection();
+        List<Beer> beers = connection.Query<Beer, Brewer, Beer>(sql,
+            map: (beer, brewer) =>
+            {
+                if (BrouwerId.ContainsKey(beer.BrewerId))
+                {
+                    beer = BrouwerId[beer.BrewerId];
+                }
+                else
+                {
+                    beer.Brewer = brewer;
+                    BrouwerId.Add(beer.BrewerId, beer);
+                }
+
+                
+                return beer;
+            },
+            splitOn: "brewerid").ToList();
+        return beers;
+    }
+
+
+// 3.5 Question
+    // N+1 probleem (1-to-many relationship)
+    // Geef een overzicht van alle brouwerijen en hun bieren. Sorteer op brouwerijnaam en daarna op biernaam.
+    // Doe dit door eerst een Query<Brewer>(...) te doen die alle brouwerijen ophaalt. (Dit is 1)
+    // Loop (foreach) daarna door de brouwerijen en doe voor elke brouwerij een Query<Beer>(...)
+    // die de bieren ophaalt voor die brouwerij. (Dit is N)
+    // Dit is een N+1 probleem. Hoe los je dit op? Dat zien we in de volgende vragen.
+    // Als N groot is (veel brouwerijen) dan kan dit een performance probleem zijn of worden. Probeer dit te voorkomen!
+    public static List<Brewer> GetAllBrewersIncludingBeersNPlus1()
+    {
+        string sqlbrewer = @"select brewer.BrewerId, brewer.Name, brewer.Country
+                       from brewer
+                       order by brewer.Name";
+
+        using var connection = DbHelper.GetConnection();
+        List<Brewer> brewers = connection.Query<Brewer>(sqlbrewer).ToList();
+
+        foreach (var brewer in brewers)
+        {
+            string sqlBeers = @"select beer.BeerId, beer.Name, beer.Type, beer.Style, beer.Alcohol, beer.BrewerId
+                                from beer
+                                where BrewerId = @BrewerId
+                                order by beer.Name";
+
+            var beers = connection.Query<Beer>(sqlBeers, new { BrewerId = brewer.BrewerId }).ToList();
+            brewer.Beers = beers;
+        }
+
+        return brewers;
+    }
+    
+    // 3.6 Question
+    // 1 op n relatie (one-to-many relationship)
+    // Schrijf een query die een overzicht geeft van alle brouwerijen. Vul per brouwerij de property Beers (List<Beer>) met de bieren van die brouwerij.
+    // Sorteer op brouwerijnaam en daarna op biernaam.
+    // Gebruik de methode Query<Brewer, Beer, Brewer>(sql, map: ...)
+    // Het is belangrijk dat je de map functie gebruikt om de bieren te vullen.
+    // De query geeft per brouwerij meerdere bieren terug. Dit is een 1 op veel relatie.
+    // Om ervoor te zorgen dat de bieren van dezelfde brouwerij naar dezelfde instantie van Brewer verwijzen,
+    // moet je een Dictionary<int, Brewer> gebruiken.
+    // Dit is een veel voorkomend patroon in Dapper.
+    // Vergeet de Distinct() methode te gebruiken om dubbel brouwerijen (Brewer) te voorkomen.
+    //  Query<...>(...).Distinct().ToList().
+    
+    public static List<Brewer> GetAllBrewersIncludeBeers()
+    {
+        string sqlBrewer = @"select brewer.BrewerId, brewer.Name,brewer.Country, brewer.Country as country, beer.BeerId, beer.Name, beer.Type, beer.Style, beer.Alcohol, beer.BrewerId
+                             from brewer, beer
+                             where brewer.BrewerId = beer.BrewerId
+                             order by brewer.Name, beer.Name";
+
+        Dictionary<int, Brewer> brewerDict = new Dictionary<int, Brewer>();
+
+        using var connection = DbHelper.GetConnection();
+        List<Brewer> brewers = connection.Query<Brewer, Beer, Brewer>(sqlBrewer,
+            map: (brewer, beer) =>
+            {
+                if (!brewerDict.TryGetValue(brewer.BrewerId, out var currentBrewer))
+                {
+                    currentBrewer = brewer;
+                    currentBrewer.Beers = new List<Beer>();
+                    brewerDict.Add(currentBrewer.BrewerId, currentBrewer);
+                }
+
+                currentBrewer.Beers.Add(beer);
+                return currentBrewer;
+            }, splitOn: "country").Distinct().ToList();
+        return brewers;
+    }
+    
+    // 3.7 Question
+    // Optioneel:
+    // Dezelfde vraag als hiervoor, echter kan je nu ook de Beers property van Brewer vullen met de bieren?
+    // Hiervoor moet je wat extra logica in map methode schrijven.
+    // Let op dat er geen dubbelingen komen in de Beers property van Beer!
+    public static List<Beer> GetAllBeersIncludeBreweryAndIncludeBeersInBrewery()
+    {
+        string sql =
+            @"
+        SELECT
+            b.BeerId AS BeerId,
+            b.Name AS BeerName,
+            b.Type AS Type,
+            b.Style AS Style,
+            b.Alcohol AS Alcohol,
+            b.BrewerId AS BrewerId,
+            
+            '' AS 'BrewerSplit',
+
+            br.BrewerId AS BrewerId,
+            br.Name AS BrewerName,
+            br.Country AS Country
+        FROM beer b
+        JOIN brewer br ON b.BrewerId = br.BrewerId";
+
+        Dictionary<int, Brewer> brewerDictionary = new Dictionary<int, Brewer>();
+
+        using var connection = DbHelper.GetConnection();
+        List<Beer> beers = connection.Query<Beer, Brewer, Beer>(
+                sql,
+                map: (beer, brewer) =>
+                {
+                    if (!brewerDictionary.TryGetValue(brewer.BrewerId, out var brewerEntry))
+                    {
+                        brewerEntry = brewer;
+                        brewerEntry.Beers = new List<Beer>();
+                        brewerDictionary.Add(brewer.BrewerId, brewerEntry);
+                    }
+
+                    beer.Brewer = brewerEntry;
+                    if (!brewerEntry.Beers.Any(b => b.BeerId == beer.BeerId))
+                    {
+                        brewerEntry.Beers.Add(beer);
+                    }
+
+                    return beer;
+                },
+                splitOn: "BrewerSplit")
+            .Distinct()
+            .ToList();
+
+        return beers;
+    }
+    // 3.8 Question
+    // n op n relatie (many-to-many relationship)
+    // Geef een overzicht van alle cafés en welke bieren ze schenken.
+    // Let op een café kan meerdere bieren schenken. En een bier wordt vaak in meerdere cafe's geschonken. Dit is een n op n relatie.
+    // Sommige cafés schenken geen bier. Dus gebruik LEFT JOINS in je query.
+    // Bij n op n relaties is er altijd spraken van een tussen-tabel (JOIN-table, associate-table), in dit geval is dat de tabel Sells.
+    // Gebruikt de multi-mapper Query<Cafe, Beer, Cafe>("query", splitOn: "splitCol1, splitCol2").
+    // Gebruik de klassen Cafe en Beer. 
+    // De bieren worden opgeslagen in een de property Beers (List<Beer>) van de klasse Cafe.
+    // Sorteer op cafénaam en daarna op biernaam.
+    
+    // Kan je ook uitleggen wat het verschil is tussen de verschillende JOIN's en wat voor gevolg dit heeft voor het resultaat?
+    // Het is belangrijk om te weten wat de verschillen zijn tussen de verschillende JOIN's!!!! Als je dit niet weet, zoek het op!
+    // Als je dit namelijk verkeerd doet, kan dit grote gevolgen hebben voor je resultaat (je krijgt dan misschien een verkeerde aantal records).
+    public static List<Cafe> OverzichtBierenPerKroegLijstMultiMapper()
+    {
+        string sql = @"select cafe.CafeId, cafe.Name, cafe.Address, cafe.City as city, beer.BeerId, beer.Name, beer.Type, beer.Style, beer.Alcohol, beer.BrewerId
+                       from cafe, beer
+                       where sells.CafeId = cafe.CafeId and sells.BeerId = beer.BeerId
+                       order by cafe.Name, beer.Name";
+
+        Dictionary<int, Beer> beersDict = new Dictionary<int, Beer>();
+
+        using var connection = DbHelper.GetConnection();
+        List<Cafe> cafes = connection.Query<Cafe, Beer, Cafe>(sql,
+            map: (cafe, beer) =>
+            {
+                if (beersDict.ContainsKey(beer.BeerId))
+                {
+                    beer = beersDict[beer.BeerId];
+                }
+                else
+                {
+                    beersDict.Add(beer.BeerId, beer);
+                }
+                
+                return cafe;
+            }, splitOn: "city").Distinct().ToList();
+        return cafes;
+    }
+
+    // 3.9 Question
+    // We gaan nu nog een niveau dieper. Geef een overzicht van alle brouwerijen, met daarin de bieren die ze verkopen,
+    // met daarin in welke cafés ze verkocht worden.
+    // Sorteer op brouwerijnaam, biernaam en cafenaam. 
+    // Gebruik (vul) de class Brewer, Beer en Cafe.
+    // Gebruik de methode Query<Brewer, Beer, Cafe, Brewer>(...) met daarin de juiste JOIN's in de query en splitOn parameter.
+    // Je zult twee dictionaries moeten gebruiken. Een voor de brouwerijen en een voor de bieren.
+    public static List<Brewer> GetAllBrewersIncludeBeersThenIncludeCafes()
+    {
+        string sql = @"select brewer.BrewerId, brewer.Name, brewer.Country, '' as brewersplit, beer.BeerId, beer.Name, beer.Type, beer.Style, beer.Alcohol, beer.BrewerId, '' as beersplit,
+                       cafe.CafeId, cafe.Name, cafe.Address, cafe.City
+                       from brewer
+                       left join beer on brewer.BrewerId = beer.BrewerId
+                       left join sells on beer.BeerId = sells.BeerId
+                       left join cafe on sells.CafeId = cafe.CafeId
+                       order by brewer.Name, beer.Name, cafe.Name";
+
+        Dictionary<int, Brewer> dictBrewer = new Dictionary<int, Brewer>();
+        Dictionary<int, Beer> dictBeer = new Dictionary<int, Beer>();
+
+        using var connection = DbHelper.GetConnection();
+        List<Brewer> brewers = connection.Query<Brewer, Beer, Cafe, Brewer>(sql,
+            map: (brewer, beer, cafe) =>
+            {
+                if (!dictBrewer.TryGetValue(brewer.BrewerId, out var existingBrewer))
+                {
+                    existingBrewer = brewer;
+                    existingBrewer.Beers = new List<Beer>();
+                    dictBrewer.Add(brewer.BrewerId, existingBrewer);
+                }
+
+                if (!dictBeer.TryGetValue(beer.BeerId, out var existingBeer))
+                {
+                    existingBeer = beer;
+                    existingBeer.Cafes = new List<Cafe>(); 
+                    dictBeer.Add(beer.BeerId, existingBeer);
+                    
+                    existingBrewer.Beers.Add(existingBeer);
+                }
+                
+                if (cafe != null && cafe.CafeId != 0 && !existingBeer.Cafes.Contains(cafe))
+                {
+                    existingBeer.Cafes.Add(cafe);
+                }
+
+                return existingBrewer;
+            }, splitOn: "brewersplit, beersplit").Distinct().ToList();
+        return brewers;
+    }
+    
+    // 3.10 Question - Er is geen test voor deze vraag
+    // Optioneel: Geef een overzicht van alle bieren en hun de bijbehorende brouwerij.
+    // Sorteer op brouwerijnaam, biernaam.
+    // Gebruik hiervoor een View BeerAndBrewer (maak deze zelf). Deze view bevat alle informatie die je nodig hebt gebruikt join om de tabellen Beer, Brewer.
+    // Let op de kolomnamen in de view moeten uniek zijn. Dit moet je dan herstellen in de query waarin je view gebruik zodat Dapper het snap
+    // (SELECT BeerId, BeerName as Name, Type, ...). Zie BeerName als voorbeeld hiervan.
+    public static List<Beer> GetBeerAndBrewersByView()
+    {
+        throw new NotImplementedException();
+    }
+}  
